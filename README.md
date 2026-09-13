@@ -6,6 +6,8 @@ This is a 14-day build-and-learn-in-public challenge about understanding what ha
 
 It is not an anti-AI challenge. AI is part of the workflow now, and I want to become better at using it. The point is that fundamentals are what let engineers ask better questions, evaluate generated code, spot trade-offs, and make responsible decisions.
 
+**Start here:** [.NET API Foundations](docs/00-dotnet-api-foundations.md) — a Day 0 prerequisite refresher before Day 1 begins.
+
 ## Why I'm doing this
 
 I'm a software engineer working with .NET, React, SQL, and AWS. This is a personal learning project, not a job-search announcement.
