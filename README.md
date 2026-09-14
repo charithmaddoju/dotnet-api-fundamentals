@@ -6,7 +6,7 @@ This is a 14-day build-and-learn-in-public challenge about understanding what ha
 
 It is not an anti-AI challenge. AI is part of the workflow now, and I want to become better at using it. The point is that fundamentals are what let engineers ask better questions, evaluate generated code, spot trade-offs, and make responsible decisions.
 
-**Start here:** [.NET API Foundations](docs/00-dotnet-api-foundations.md) — a Day 0 prerequisite refresher before Day 1 begins.
+**Start here:** [Day 1 — .NET API Foundations](docs/day-01-dotnet-fundamentals-and-hosting.md).
 
 ## Why I'm doing this
 
@@ -28,20 +28,21 @@ But I won't treat generated answers as the final word. I'll verify what I learn 
 
 ## The 14-day roadmap
 
-- [ ] Day 1 — ASP.NET Core request pipeline and middleware
-- [ ] Day 2 — Dependency injection and service lifetimes
-- [ ] Day 3 — API structure, DTOs, and clean boundaries
-- [ ] Day 4 — Validation and error handling
-- [ ] Day 5 — EF Core and database migrations
-- [ ] Day 6 — EF Core tracking and query performance
-- [ ] Day 7 — Authentication and authorization
-- [ ] Day 8 — Async/await in APIs
-- [ ] Day 9 — Caching
-- [ ] Day 10 — Logging and observability
-- [ ] Day 11 — Unit and integration testing
-- [ ] Day 12 — Docker
-- [ ] Day 13 — AWS deployment
-- [ ] Day 14 — The complete request journey and final recap
+- [x] Day 1 — .NET fundamentals, hosting, and a practical Nginx load-balancing demo
+- [ ] Day 2 — ASP.NET Core request pipeline and middleware
+- [ ] Day 3 — Dependency injection and service lifetimes
+- [ ] Day 4 — API structure, DTOs, and clean boundaries
+- [ ] Day 5 — Validation and error handling
+- [ ] Day 6 — EF Core and database migrations
+- [ ] Day 7 — EF Core tracking and query performance
+- [ ] Day 8 — Authentication and authorization
+- [ ] Day 9 — Async/await in APIs
+- [ ] Day 10 — Caching
+- [ ] Day 11 — Logging and observability
+- [ ] Day 12 — Unit and integration testing
+- [ ] Day 13 — Docker
+- [ ] Day 14 — AWS deployment
+- [ ] Day 15 — The complete request journey and final recap
 
 ## How to follow along
 
@@ -55,22 +56,23 @@ The detailed lessons will live in [`docs/`](docs/). As the series progresses, ea
 .
 ├── docs/       # Detailed daily lessons
 ├── diagrams/   # Request-flow and architecture diagrams
+├── examples/   # Small supporting demo projects (e.g., Day 1's Nginx load-balancing exercise)
 ├── src/        # Small .NET API built as supporting evidence
 └── tests/      # Unit and integration tests
 ```
 
-The API is deliberately not here yet. Day 1 starts tomorrow with the ASP.NET Core request pipeline and middleware.
+The main `src/` API is deliberately not here yet — that starts with Day 2's request pipeline and middleware work. A small standalone demo already lives under `examples/` to support Day 1's practical exercise.
 
 ## Publishing workflow
 
 `main` will remain the public, readable record of the complete journey. Each day will be developed on a short-lived branch, then squash-merged into `main` as one meaningful commit—for example:
 
 ```text
-day 01: document the ASP.NET Core request pipeline
+day 01: document .NET fundamentals and hosting
 ```
 
 That same commit will update the roadmap and link to the completed lesson.
 
 ---
 
-Starting tomorrow. One useful concept at a time.
+One useful concept at a time.

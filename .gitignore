@@ -1,0 +1,11 @@
+# .NET
+bin/
+obj/
+*.user
+
+# macOS
+.DS_Store
+
+# Nginx demo runtime output (examples/day-01-nginx-load-balancing)
+examples/**/logs/*.log
+examples/**/logs/*.pid

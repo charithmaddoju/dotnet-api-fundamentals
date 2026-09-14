@@ -1,8 +1,8 @@
-# .NET API Foundations: What Happens Before Day 1?
+# Day 1 — .NET API Foundations: Fundamentals, Kestrel, TLS, and Reverse Proxies
 
-This is **Day 0** — a prerequisite refresher, not one of the 14 challenge days. Before tracing a request through the ASP.NET Core middleware pipeline on Day 1, I wanted to write down (and re-check against official docs) the fundamentals I'm assuming I already know. Some of this I use daily. Some of it I've never had to explain out loud. Writing it down in public is the point of this whole challenge.
+This is **Day 1** of the challenge. Before tracing a request through the ASP.NET Core middleware pipeline on Day 2, I wanted to write down (and re-check against official docs) the fundamentals I'm assuming I already know. Some of this I use daily. Some of it I've never had to explain out loud. Writing it down in public is the point of this whole challenge.
 
-If you already know all of this, skip ahead to [Day 1](day-01-request-pipeline-and-middleware.md) once it's published. If you're refreshing .NET like I am, hopefully this saves you some searching.
+If you already know all of this, skip ahead to [Day 2](day-02-request-pipeline-and-middleware.md) once it's published. If you're refreshing .NET like I am, hopefully this saves you some searching.
 
 > A few of the examples below (file listings, exact sizes, a scratch Web API's generated structure) come from small throwaway projects built and inspected on my own machine while writing this — not committed to the repo, just experiments run to verify the claims rather than assume them.
 
@@ -34,9 +34,15 @@ If you already know all of this, skip ahead to [Day 1](day-01-request-pipeline-a
     - [10.1 Where routing, middleware, DI, and configuration sit on top of Kestrel](#101-where-routing-middleware-di-and-configuration-sit-on-top-of-kestrel)
 11. [Understanding a Web API project structure](#11-understanding-a-web-api-project-structure)
 12. [Minimal APIs, controllers, and architecture](#12-minimal-apis-controllers-and-architecture)
-13. [What we will verify in this repository](#13-what-we-will-verify-in-this-repository)
-14. [What comes next](#14-what-comes-next)
-15. [Sources](#sources)
+13. [Follow-up questions: TLS handshakes, reverse proxies, and load balancers](#13-follow-up-questions-tls-handshakes-reverse-proxies-and-load-balancers)
+    - [13.1 The TLS handshake, step by step](#131-the-tls-handshake-step-by-step)
+    - [13.2 Why the reverse proxy can't hand the connection off to Kestrel](#132-why-the-reverse-proxy-cant-hand-the-connection-off-to-kestrel)
+    - [13.3 Forward proxy vs. reverse proxy](#133-forward-proxy-vs-reverse-proxy)
+    - [13.4 Load-balancer strategies: it's not just RAM](#134-load-balancer-strategies-its-not-just-ram)
+    - [13.5 Try it yourself: two Kestrel instances behind Nginx](#135-try-it-yourself-two-kestrel-instances-behind-nginx)
+14. [What we will verify in this repository](#14-what-we-will-verify-in-this-repository)
+15. [What comes next](#15-what-comes-next)
+16. [Sources](#sources)
 
 ---
 
@@ -61,7 +67,7 @@ So the learning loop for these 14 days is deliberately **AI + official docs + sm
 - **Experiments** — actually running commands, inspecting output, poking at a real running API — because reading about behavior and observing it are different things.
 - **Tests** as the thing that proves a piece of behavior, rather than just asserting it in a doc.
 
-This document itself follows that loop: I used AI to structure it, cross-checked the factual claims against Microsoft Learn, and I'll verify the practical bits (project structure, DLLs, HTTP requests) hands-on starting Day 1.
+This document itself follows that loop: I used AI to structure it, cross-checked the factual claims against Microsoft Learn, and I verified the practical bits (project structure, DLLs, the Nginx load-balancing demo) hands-on rather than just describing them — with the remaining HTTP-request checks continuing from Day 2 onward.
 
 ## 2. The .NET ecosystem: .NET, C#, ASP.NET Core, and the SDK
 
@@ -290,7 +296,7 @@ All the real application logic still lives in the DLL — the apphost's only job
 
 One more distinction worth knowing, expanded fully in section 3.3: `dotnet build` output (`bin/Debug/<tfm>/`, as above) is meant for local development. `dotnet publish` output (`bin/Release/<tfm>/publish/` by default) is the one meant for actual deployment.
 
-> **Verification exercise (do this after Day 1, once a project exists):**
+> **Verification exercise (do this after Day 2, once a project exists):**
 > Run `dotnet build`, then look inside `bin/Debug/<target-framework>/` (e.g. `bin/Debug/net10.0/`, or whatever version is installed) — compare it against the file listing in section 4.1 above. Identify the application's own DLL, the dependency DLLs it references, and the apphost — then check what `file` (macOS/Linux) or a similar tool reports it as.
 
 ## 5. What kinds of applications can .NET build?
@@ -325,7 +331,7 @@ The API receives that request, looks up the tasks (probably from a database), an
 
 ```json
 [
-  { "id": 1, "title": "Write Day 0 notes", "done": true },
+  { "id": 1, "title": "Write Day 1 notes", "done": true },
   { "id": 2, "title": "Scaffold the API project", "done": false }
 ]
 ```
@@ -380,7 +386,7 @@ Content-Type: application/json     ← body format
 }
 ```
 
-**Not runnable yet — this needs an actual running API (Day 1+):**
+**Not runnable yet — this needs an actual running API (Day 2+):**
 
 ```bash
 curl -i https://localhost:5001/api/tasks
@@ -507,7 +513,7 @@ flowchart TD
 
 Not every deployment has every layer. A small side project might run Kestrel directly on a cloud VM, listening on its own port with nothing in front of it. A typical company deployment stacks a cloud load balancer, then a reverse proxy (Nginx or IIS), then Kestrel — each layer adding exactly one responsibility (distribute load; terminate TLS and route; parse HTTP and hand off to the app). Section 9 traces this same idea as one request's actual journey, including what's different for local development.
 
-*How Kestrel decides what to do with a request once it has one — the middleware pipeline — is deliberately not covered here. That's Day 1.*
+*How Kestrel decides what to do with a request once it has one — the middleware pipeline — is deliberately not covered here. That's Day 2.*
 
 ## 9. How an HTTP request reaches an ASP.NET Core API
 
@@ -535,7 +541,7 @@ flowchart LR
     C2 --> D2[Application]
 ```
 
-*The middleware pipeline and endpoint routing boxes above are placeholders for now — Day 1 opens them up and traces exactly what happens inside.*
+*The middleware pipeline and endpoint routing boxes above are placeholders for now — Day 2 opens them up and traces exactly what happens inside.*
 
 ## 10. What is ASP.NET Core, and how do we create a Web API?
 
@@ -557,7 +563,7 @@ At a high level, this command generates a new project directory containing:
 
 The same project can also be created through **Visual Studio** (File → New Project → ASP.NET Core Web API) or **VS Code** (via the same `dotnet new` command run from its integrated terminal, or the C# Dev Kit's project creation UI) — they all produce the same underlying template.
 
-No generated project files are added to this repository as part of this Day 0 document — that happens when the API is actually scaffolded.
+No generated project files are added to this repository as part of this document — that happens when the API is actually scaffolded.
 
 ### 10.1 Where routing, middleware, DI, and configuration sit on top of Kestrel
 
@@ -574,7 +580,7 @@ flowchart TD
     E --> F["Your endpoint code"]
 ```
 
-That diagram simplifies one thing worth flagging: configuration and DI aren't stages a request "passes through" in sequence the way middleware and routing genuinely are — they're infrastructure the host makes available continuously, which any layer can reach into at any point. Middleware and routing really are an ordered pipeline the request flows through one step at a time — which is exactly what Day 1 is for.
+That diagram simplifies one thing worth flagging: configuration and DI aren't stages a request "passes through" in sequence the way middleware and routing genuinely are — they're infrastructure the host makes available continuously, which any layer can reach into at any point. Middleware and routing really are an ordered pipeline the request flows through one step at a time — which is exactly what Day 2 is for.
 
 ## 11. Understanding a Web API project structure
 
@@ -623,20 +629,117 @@ Choosing Minimal APIs does **not** prevent using a layered or Clean Architecture
 
 For this repository, the plan is to start with whatever's simplest (very likely Minimal APIs, since the template defaults to them) and introduce more structure only when a real complexity problem shows up — not preemptively.
 
-## 13. What we will verify in this repository
+## 13. Follow-up questions: TLS handshakes, reverse proxies, and load balancers
 
-This document is notes and definitions — the following is what still needs to be checked hands-on, starting Day 1. None of this is done yet:
+Section 7.1 and section 8 above cover *why* HTTPS needs a certificate and *why* you'd put a reverse proxy or load balancer in front of Kestrel. After writing those, I still had a handful of "okay, but concretely, how?" questions left over — so I took them to a separate chat, cross-checked the answers against the same Microsoft Learn docs cited in Sources, and I'm folding the useful parts back in here rather than leaving them scattered in a chat transcript.
 
+### 13.1 The TLS handshake, step by step
+
+Section 7.1 explains *why* a certificate is needed (identity + encryption) but skips over the actual sequence of messages. Written out as a handshake:
+
+```text
+Client                                          Server
+  │                                               │
+  │── "I want HTTPS for api.example.com" ───────>│
+  │                                               │
+  │<── Certificate: domain + public key ─────────│
+  │                                               │
+  │  Client checks the certificate:               │
+  │  - domain name matches                        │
+  │  - not expired                                │
+  │  - issuing CA is trusted                      │
+  │  - CA's signature is valid                    │
+  │                                               │
+  │── (proceeds only if all checks pass) ────────>│
+  │                                               │
+  │<── Server proves it holds the private key ───│
+  │                                               │
+  │<═══ Client and server derive session keys ══>│
+  │                                               │
+  │════ Encrypted HTTP requests/responses ═══════│
+```
+
+The step I'd been glossing over is **"server proves it holds the private key."** A certificate is public data — an attacker can copy a bank's real certificate byte-for-byte and hand it to a victim. What the attacker *can't* do is complete this next step: during the handshake, the genuine server performs a cryptographic operation using its private key (which never leaves the server), and the client verifies that operation using the public key already sitting inside the certificate it just received. Only the real holder of the private key can produce a valid result. That's the actual moment identity gets proven — the certificate alone is just the claim; this step is the proof.
+
+Once identity is confirmed, the certificate has done its job. The client and server then derive **session keys** — temporary, symmetric keys used to encrypt the rest of the conversation efficiently, because asymmetric public/private-key operations are too slow to use for every byte of HTTP traffic. So the certificate's role is narrow and front-loaded: establish trust in the server's identity and its public key; everything encrypted afterward rides on the (cheaper) session keys instead.
+
+### 13.2 Why the reverse proxy can't hand the connection off to Kestrel
+
+Section 8.3 lists *reasons* to put a reverse proxy in front of Kestrel (TLS termination, sharing one public port, shielding against abusive clients, and so on) but doesn't say why the proxy has to stay involved for the *entire* request, rather than just the first one.
+
+The answer is about which process owns the connection. When TLS termination happens at the proxy (section 8.3), the client's actual TCP connection and TLS session belong to the proxy — not to Kestrel. The client only ever completed a TLS handshake with the proxy; it never established anything with Kestrel directly, and Kestrel was never involved in that handshake at all. So the proxy can't just step aside after the first request and let the client talk to Kestrel directly for the rest — there is no existing client-to-Kestrel connection to hand things off to. For that to happen, the client would need to open a brand new TCP connection to Kestrel and perform a brand new TLS handshake with it — which means Kestrel would need to be publicly reachable and hold its own certificate, which defeats most of the reasons for having the proxy in the first place (centralized TLS, routing, rate limiting, hidden backends). This is why every single request in a proxied deployment flows through the proxy: it isn't a limitation, it's a direct consequence of *whose* TLS session the request is traveling over.
+
+The connection from the proxy to Kestrel is a separate hop entirely — it can be plain HTTP inside a private network, or HTTPS again if the internal network itself isn't trusted.
+
+### 13.3 Forward proxy vs. reverse proxy
+
+Both are "a server that sits in the middle," which is exactly why the names get confused. The difference is *whose behalf* the proxy is acting on:
+
+```text
+Forward proxy — acts for the client:
+  Client → Forward proxy → the open internet
+
+Reverse proxy — acts for the server:
+  Internet client → Reverse proxy → internal backend
+```
+
+A forward proxy is the client's proxy — a company's outbound web filter, for example, where the destination server has no idea a proxy is involved. A reverse proxy (Nginx/IIS in front of Kestrel, section 8.3) is the server's proxy — the client has no idea it isn't talking to the real backend directly.
+
+### 13.4 Load-balancer strategies: it's not just RAM
+
+Section 8.4 says a load balancer distributes traffic across instances, without saying *how* it picks one. I'd assumed it always checked something like memory usage — it doesn't have to. Common strategies:
+
+| Strategy | How it picks an instance |
+|---|---|
+| **Round-robin** | Cycle through instances in order, one request each |
+| **Least connections** | Send to whichever instance currently has the fewest active connections |
+| **Health checks** | Skip instances that are failing or unresponsive, regardless of strategy otherwise used |
+| **Weighted** | Send proportionally more traffic to stronger/larger instances |
+| **Resource-aware** | Use live CPU, memory, or a custom metric to decide |
+
+RAM usage *can* feed a resource-aware strategy, but it's one option among several, not the definition of load balancing. Round-robin is the simplest and the one the demo in 13.5 actually uses.
+
+### 13.5 Try it yourself: two Kestrel instances behind Nginx
+
+The best way to stop treating "reverse proxy" and "load balancer" as abstract boxes in a diagram is to actually run two API instances behind Nginx and watch requests alternate between them. I built exactly that as a small supporting project — [`examples/day-01-nginx-load-balancing/`](../examples/day-01-nginx-load-balancing/) — rather than only describe it:
+
+```text
+curl
+  ↓
+Nginx  (listens on :8080, round-robins)
+  ├──→ Kestrel instance A (:5001)
+  └──→ Kestrel instance B (:5002)
+```
+
+Both instances run the exact same Minimal API; an environment variable tells each one its own name, and the single endpoint just echoes it back. See that folder's own README for the exact commands. Running it for real, with Nginx actually round-robining between both instances:
+
+```text
+$ for i in 1 2 3 4 5 6; do curl -s http://localhost:8080/; echo; done
+{"instance":"A","port":5001,"time":"2026-09-14T07:42:00.4414670Z"}
+{"instance":"B","port":5002,"time":"2026-09-14T07:42:00.4536990Z"}
+{"instance":"A","port":5001,"time":"2026-09-14T07:42:00.4615560Z"}
+{"instance":"B","port":5002,"time":"2026-09-14T07:42:00.4673720Z"}
+{"instance":"A","port":5001,"time":"2026-09-14T07:42:00.4734420Z"}
+{"instance":"B","port":5002,"time":"2026-09-14T07:42:00.4789500Z"}
+```
+
+That alternation is round-robin load balancing, observed directly rather than assumed. The next step, not done yet, is adding a local certificate to Nginx and watching TLS termination happen the same way — the mechanics from section 13.1, this time in front of a real reverse proxy instead of just a client and one server.
+
+## 14. What we will verify in this repository
+
+This document is notes and definitions — the following is what still needs to be checked hands-on. Some of it is already done, as part of Day 1:
+
+- [x] Run two Kestrel instances behind Nginx and observe round-robin load balancing (section 13.5, `examples/day-01-nginx-load-balancing/`)
 - [ ] Inspect the generated DLL(s) after `dotnet build` and identify app vs. dependency DLLs
 - [ ] Send real HTTP requests to a running API using `curl` or a REST client
 - [ ] Observe the local port and running process for the API
-- [ ] Run a middleware experiment (Day 1)
+- [ ] Run a middleware experiment (Day 2)
 - [ ] Inspect application logs
 - [ ] Write tests that actually prove the described behavior, rather than just asserting it here
 
-## 14. What comes next
+## 15. What comes next
 
-[Day 1](day-01-request-pipeline-and-middleware.md) will trace a request through the ASP.NET Core middleware pipeline — the part of section 9's diagram left as a placeholder.
+[Day 2](day-02-request-pipeline-and-middleware.md) will trace a request through the ASP.NET Core middleware pipeline — the part of section 9's diagram left as a placeholder.
 
 ---
 
@@ -656,7 +759,7 @@ This document is notes and definitions — the following is what still needs to 
 - [Host ASP.NET Core on Linux with Nginx](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/linux-nginx) — Nginx as a reverse proxy in front of Kestrel
 - [Configure ASP.NET Core to work with proxy servers and load balancers](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/proxy-load-balancer) — forwarded headers, `X-Forwarded-For`/`X-Forwarded-Proto`
 - [.NET Generic Host in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/host/generic-host) — how DI, configuration, logging, and Kestrel are wired together
-- [ASP.NET Core Middleware](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/middleware/) — the pipeline covered in depth on Day 1
+- [ASP.NET Core Middleware](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/middleware/) — the pipeline covered in depth on Day 2
 - [Tutorial: Create a minimal API with ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/tutorials/min-web-api) — `dotnet new webapi` and Minimal APIs
 - [Handle requests with controllers in ASP.NET Core MVC](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/actions) — the controller-based alternative
 - [HTTP request and response messages in ASP.NET Core web APIs](https://learn.microsoft.com/en-us/aspnet/core/web-api/) — HTTP fundamentals in an ASP.NET Core context
