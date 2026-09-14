@@ -4,18 +4,34 @@ This is **Day 0** — a prerequisite refresher, not one of the 14 challenge days
 
 If you already know all of this, skip ahead to [Day 1](day-01-request-pipeline-and-middleware.md) once it's published. If you're refreshing .NET like I am, hopefully this saves you some searching.
 
+> A few of the examples below (file listings, exact sizes, a scratch Web API's generated structure) come from small throwaway projects built and inspected on my own machine while writing this — not committed to the repo, just experiments run to verify the claims rather than assume them.
+
 ## Table of contents
 
 1. [Why fundamentals matter in the AI era](#1-why-fundamentals-matter-in-the-ai-era)
 2. [The .NET ecosystem: .NET, C#, ASP.NET Core, and the SDK](#2-the-net-ecosystem-net-c-aspnet-core-and-the-sdk)
+   - [2.1 What the SDK does vs. what the runtime does](#21-what-the-sdk-does-vs-what-the-runtime-does)
 3. [How .NET compares with Java](#3-how-net-compares-with-java)
+   - [3.1 .cs, IL, and native code: keeping the three straight](#31-cs-il-and-native-code-keeping-the-three-straight)
+   - [3.2 Self-contained vs. framework-dependent vs. containers](#32-self-contained-vs-framework-dependent-vs-containers)
+   - [3.3 `dotnet build` vs. `dotnet publish`, and how hosting actually works](#33-dotnet-build-vs-dotnet-publish-and-how-hosting-actually-works)
 4. [From C# source code to a running application](#4-from-c-source-code-to-a-running-application)
+   - [4.1 A worked example: one file, three stages](#41-a-worked-example-one-file-three-stages)
+   - [4.2 DLL vs EXE, and where each one comes from](#42-dll-vs-exe-and-where-each-one-comes-from)
 5. [What kinds of applications can .NET build?](#5-what-kinds-of-applications-can-net-build)
 6. [What is an API?](#6-what-is-an-api)
+   - [6.1 A non-web API, for contrast](#61-a-non-web-api-for-contrast)
 7. [HTTP fundamentals](#7-http-fundamentals)
+   - [7.1 Why HTTPS needs a certificate](#71-why-https-needs-a-certificate)
 8. [What is a .NET server?](#8-what-is-a-net-server)
+   - [8.1 HTTP rides on top of TCP](#81-http-rides-on-top-of-tcp)
+   - [8.2 Kestrel, in one sentence first](#82-kestrel-in-one-sentence-first)
+   - [8.3 Reverse proxies: the simple picture, then Nginx and IIS](#83-reverse-proxies-the-simple-picture-then-nginx-and-iis)
+   - [8.4 Cloud load balancers](#84-cloud-load-balancers)
+   - [8.5 Putting it together](#85-putting-it-together)
 9. [How an HTTP request reaches an ASP.NET Core API](#9-how-an-http-request-reaches-an-aspnet-core-api)
 10. [What is ASP.NET Core, and how do we create a Web API?](#10-what-is-aspnet-core-and-how-do-we-create-a-web-api)
+    - [10.1 Where routing, middleware, DI, and configuration sit on top of Kestrel](#101-where-routing-middleware-di-and-configuration-sit-on-top-of-kestrel)
 11. [Understanding a Web API project structure](#11-understanding-a-web-api-project-structure)
 12. [Minimal APIs, controllers, and architecture](#12-minimal-apis-controllers-and-architecture)
 13. [What we will verify in this repository](#13-what-we-will-verify-in-this-repository)
@@ -74,6 +90,34 @@ dotnet --list-sdks
 
 Lists every .NET SDK version installed on the machine, one per line. Useful when multiple SDK versions are installed side by side and I need to know which one a `global.json` file (or the default) will pick up.
 
+### 2.1 What the SDK does vs. what the runtime does
+
+"The SDK builds and runs the app" and "the runtime executes it" can sound like they're describing the same thing twice. They're not — but the reason they sound that way is that "the SDK" is used to mean two different things, and it's worth separating them explicitly.
+
+As a **responsibility**, the SDK's job really is just compiling: it takes `.cs` files and produces a compiled assembly (a `.dll`) on disk. Nothing runs during that step — building is purely a translation step. Executing that assembly — managing memory, JIT-compiling the code, enforcing type safety — is entirely the **runtime**'s (the CLR's) job, a separate concern from compiling.
+
+As an **installed package**, however, "the .NET SDK" is a superset: Microsoft ships it bundled together with a full copy of the runtime too, purely for developer convenience, so one install lets a developer both build and run apps locally without a second install. That bundling is *why* installing the SDK also lets `dotnet run` work immediately — but the two halves inside that one package still don't share a job. The compiler/MSBuild half only ever compiles; the runtime half is the only part that ever executes anything, exactly as before.
+
+```mermaid
+flowchart LR
+    A["Your .cs files"] --> B["SDK: compiles + packages"]
+    B --> C["Assembly (.dll) on disk"]
+    C --> D["Runtime: loads it + executes it"]
+```
+
+(What "compiles" and "executes" actually mean at the IL/JIT level is section 3.1 and section 4's job — this diagram is only about *which component is responsible for which phase*.)
+
+This split is also why the single `dotnet` command can mean different things depending on what's installed. `dotnet` is one executable — Microsoft calls it "the muxer" — that behaves differently depending on what's present on the machine. A **Runtime-only** install still provides a `dotnet` executable, but a stripped-down one: it can only run an already-built app (`dotnet myapp.dll`), since there's no compiler behind it. An **SDK** install provides the same `dotnet` executable, now backed by the full toolset (Roslyn, MSBuild, NuGet client) plus its own bundled runtime — so it can additionally `build`, `test`, `new`, and `publish`. This matches Microsoft's own install documentation, which ships genuinely separate installers for ".NET Runtime", ".NET Desktop Runtime", "ASP.NET Core Runtime", and ".NET SDK" (a superset of all three, plus tooling):
+
+| Installed | `dotnet myapp.dll` works? | `dotnet build` / `dotnet new` work? |
+|---|---|---|
+| .NET Runtime only | Yes | No — these need the compiler/MSBuild, which ship only with the SDK |
+| .NET SDK | Yes (using its bundled runtime) | Yes |
+
+A production server running a framework-dependent app therefore only needs the **Runtime** installer, never the SDK — it only ever needs to execute an already-compiled DLL, never to compile one.
+
+**What NuGet actually is.** A NuGet package usually *is* a smaller, already-compiled piece of .NET code — typically one or more `.dll` files, plus a manifest describing its version and its own dependencies — packaged into a single `.nupkg` file and published to a registry (nuget.org by default). The **NuGet client** (built into the `dotnet` CLI and MSBuild) is the tool that downloads those packages during `dotnet restore` (which `dotnet build` runs automatically) and adds their DLLs as references your project compiles against. NuGet itself never *runs* anything — it's purely a fetch-and-reference step at build time, the same role `npm install` plays for a JS project or `pip install` for Python. Once restored, a package's DLL sits right alongside your own app's DLL in the build output, and the CLR loads and runs both of them exactly the same way — the CLR doesn't know or care whether a DLL was compiled by you or downloaded as a package. (I saw this directly while testing for this doc: scaffolding a Web API added a `Microsoft.AspNetCore.OpenApi` NuGet reference to the `.csproj`, and after building, `Microsoft.AspNetCore.OpenApi.dll` and `Microsoft.OpenApi.dll` showed up in `bin/Debug/` right next to the app's own DLL.)
+
 ## 3. How .NET compares with Java
 
 I use this comparison for orientation, not to declare a winner — both are mature, cross-platform backend ecosystems that plenty of large systems run on successfully. The actual architecture decisions (how you structure services, manage data, handle failure) matter far more to an application's success than which of these two you picked.
@@ -90,32 +134,164 @@ I use this comparison for orientation, not to declare a winner — both are matu
 
 Both compile source into an intermediate representation (IL or bytecode) that their respective runtime JIT-compiles to native code at execution time — that's the conceptual parallel between CLR and JVM. Beyond that, the meaningful differences show up in tooling conventions and library ecosystems, not in some inherent superiority of one language.
 
-## 4. From C# source code to a running application
+One common assumption worth correcting here: "the JVM only runs Java, while the CLR runs C# and others" — as if only the CLR were multi-language. That's not quite right. Both are **managed runtimes** (your code doesn't talk to the CPU/OS directly — it runs inside a virtual execution engine providing garbage collection and type safety), and both host more than one language: the CLR runs C#, F#, and VB.NET; the JVM, despite being synonymous with Java, also runs Kotlin and Scala, because they compile to the same bytecode format. "One runtime, many languages" isn't a .NET-only idea — it's just more front-and-center in how Microsoft names things (*Common* Language Runtime).
 
-The flow from code I write to a process actually running looks like this:
+### 3.1 .cs, IL, and native code: keeping the three straight
 
-```text
-C# source files (.cs)
-        │  dotnet build
-        ▼
-   Assembly (.dll)
-        │  loaded by
-        ▼
-   .NET runtime (CLR)
-        │  JIT-compiles IL to native code, executes it
-        ▼
-   Running process
+This was the actual source of my confusion, and I don't think more paragraphs would have fixed it — I needed to see the three things next to each other and know exactly where each one physically lives.
+
+```mermaid
+flowchart LR
+    A["C# source (.cs)"] --> B["IL — inside the .dll"]
+    B --> C["Native code — in memory only"]
 ```
 
-A **DLL** in .NET is an *assembly* — a compiled unit that bundles IL code, metadata describing its types, and a manifest listing which other assemblies it depends on. Assemblies are the fundamental unit of deployment and versioning in .NET; the runtime uses the metadata to resolve types and load dependencies at run time. An assembly can be a library DLL or, for an app, the entry-point assembly the runtime starts executing.
+| Thing | What it is | Where it physically lives |
+|---|---|---|
+| C# source | Human-written code | `.cs` files, in your project |
+| **IL** (also CIL / MSIL) | CPU-independent instructions — the compiler's *real* output | Packed inside the `.dll` file, on disk. **IL and the DLL are not the same thing — IL is the content, the `.dll` is the container it's shipped in.** |
+| **Native machine code** | The actual CPU-specific instructions your processor executes directly — no further translation needed | Generated by the JIT compiler *at run time*, kept only in memory, method by method, the first time each method is called. It is never written back into the `.dll`. |
 
-Depending on the OS and how the project is built or published, there may *also* be a native executable host alongside the DLL (for example, an `.exe` on Windows, or an apphost binary on Linux/macOS) that exists purely to launch the .NET runtime and load the app's DLL — the actual application code still lives in the DLL either way.
+So: the compiler never produces native code directly. It produces IL, and IL rides inside the `.dll`. Only when the CLR actually runs your app does the JIT convert that IL into real, final, CPU-native bytes — and that conversion happens in memory, on the fly, not as a separate build step you'd ever see as a file. That's also the direct answer to "is native code the end bytes the computer understands" — yes, that's the literal end of the chain; there's nothing beneath native code except the CPU itself.
+
+Java's version of this is the same shape, different names: `.java` → `javac` → bytecode (inside a `.class`, typically bundled into a `.jar`) → JVM's own JIT → native code in memory. Same three-link chain, same reason it exists: bytecode/IL is portable across machines; only the final JIT step is specific to the CPU actually running it.
+
+### 3.2 Self-contained vs. framework-dependent vs. containers
+
+This connects straight back to section 2.1: whether a deployment target needs the .NET *runtime* pre-installed depends entirely on which of these publishing modes you use.
+
+- **Framework-dependent** (the default) — ship just your app's compiled code plus a small native launcher. The target machine must already have a matching .NET runtime installed.
+- **Self-contained** — ship your app's code *and* a full copy of the .NET runtime it needs. The target machine needs nothing pre-installed.
+- **Containers** — package the app (built either way above) together with a minimal OS layer into one portable image, run by a container engine like Docker, regardless of what's on the host.
+
+**Which one do people actually reach for?** In practice: **framework-dependent** is the default and the overwhelming majority case — most hosting environments (a VM you control, a PaaS like AWS Elastic Beanstalk or Azure App Service) let you install or pre-select the .NET runtime once, so there's no reason to pay the size cost of bundling it into every deployment. **Self-contained** shows up when you *don't* control the target environment at all — shipping a CLI tool to end users' machines, or a constrained execution environment (some AWS Lambda custom-runtime setups) where you can't guarantee any .NET version is pre-installed. **Containers** have become the default choice for most professional/production deployments *regardless* of self-contained vs. framework-dependent, because the container solves a different, bigger problem than either mode does on its own — the next few paragraphs are about why.
+
+| Mode | What's shipped | Target machine needs | Real size, from a one-file console app I actually published both ways |
+|---|---|---|---|
+| Framework-dependent | App DLL + native launcher | A matching .NET runtime, pre-installed | **152 KB** |
+| Self-contained | App DLL + launcher + full .NET runtime (~190 files) | Nothing but the OS itself | **83 MB** |
+| Container | App (either mode above) + OS layer, as one image | A container runtime (e.g. Docker) | Similar to whichever mode is inside it, plus a base-image layer |
+
+**What a container actually is, and why it exists.** A container is a running process that's been bundled together with everything it needs to run — its code, its runtime, its system libraries, its configuration — into an isolated little world that behaves identically no matter what machine it's actually running on. The blueprint for that bundle is called an **image**: a read-only template built from a `Dockerfile`, where each instruction in the file (`FROM`, `COPY`, `RUN`, …) adds one layer on top of the last, and the final image is just that stack of layers. The relationship between an **image** and a **container** is the same relationship as an assembly and a running process from section 4 — the image is the thing sitting on disk; a container is one *running instance* of that image, the same way a process is one running instance of a `.dll`. You can start several containers from the same image at once, just like you can run the same `.dll` as several separate processes.
+
+**Why bother, when self-contained deployment already bundles the runtime?** Self-contained solves "does this machine have .NET installed" — it says nothing about the rest of the environment: OS package versions, environment variables, conflicting software, file-system layout, network configuration. A container image bundles a *minimal OS layer* too, so "works on my machine" stops being a meaningful sentence — if it runs in the image, it runs identically anywhere that image runs, dev laptop or production cluster. That's the whole "works on my machine" problem containers exist to close.
+
+**How you'd actually use one, concretely:** you build an image once (`dotnet publish -t:PublishContainer`, or a `Dockerfile`), push it to a registry (Docker Hub, AWS ECR, Azure Container Registry — the same idea as NuGet, but for images instead of DLLs), and then a container runtime somewhere pulls that exact image and runs it. Day 12 of this challenge is where I'll actually do this end-to-end, rather than just describe it.
+
+**How these three actually get hosted, in practice** (vocabulary for now — Day 13 covers AWS deployment hands-on):
+
+- **Framework-dependent** → a VM/EC2 instance or PaaS (AWS Elastic Beanstalk, Azure App Service) where the platform provides a pre-installed .NET runtime; you deploy just your small published output onto it.
+- **Self-contained** → a bare compute environment with no assumptions about what's installed — a minimal EC2 instance, an AWS Lambda custom runtime, or handing a binary directly to someone.
+- **Container** → pushed to a registry (ECR/ACR/Docker Hub), then run by a container orchestrator: AWS ECS/Fargate, EKS (Kubernetes), Azure Container Apps. This is the dominant pattern for production services today, independent of whether the image itself is self-contained or framework-dependent inside.
+
+**Not runnable yet — `dotnet publish` commands for once the project exists:**
+
+```bash
+# framework-dependent (default) — needs the .NET runtime on the target machine
+dotnet publish -c Release
+
+# self-contained — bundles the runtime, targets a specific OS/architecture
+dotnet publish -c Release -r osx-arm64 --self-contained true
+
+# as a container image
+dotnet publish -c Release -t:PublishContainer
+```
+
+**Where does IIS fit into any of this?** It doesn't, directly — IIS is not a deployment *mode*, it's a *hosting* option on Windows (something that runs a framework-dependent or self-contained app once it's already published). Section 8.3 covers IIS properly, alongside Nginx, as part of explaining reverse proxies.
+
+### 3.3 `dotnet build` vs. `dotnet publish`, and how hosting actually works
+
+Two things worth separating cleanly: *which files each command produces*, and *what actually happens between typing `dotnet run` on your laptop and a real server answering requests on the internet*.
+
+**`dotnet build` vs. `dotnet publish`, side by side** — I ran both against the same one-file console app to see this for real, rather than describe it from memory. (`<tfm>` below stands for **target framework moniker** — the short code identifying which .NET version the project targets, e.g. `net10.0`; it's the same folder name seen as `net10.0` in section 4.1.)
+
+| | `dotnet build` | `dotnet publish` (framework-dependent) |
+|---|---|---|
+| Purpose | Local development loop — quick, includes debug info | Produces the artifact you actually deploy |
+| Default output folder | `bin/Debug/<tfm>/` | `bin/Release/<tfm>/publish/` |
+| Files produced | `App`, `App.dll`, `App.pdb`, `App.deps.json`, `App.runtimeconfig.json` | The exact same five files, just in Release configuration and in the `publish/` folder |
+| Debug symbols (`.pdb`) | Included | Included by default too (can be excluded) |
+
+For this simple app, `publish` and `build` produce nearly identical *shapes* of output — the real difference publish adds is the Release build configuration, the dedicated `publish/` folder meant for copying elsewhere, and (as covered in 3.2) the option to make that output self-contained or a container image instead.
+
+**Does `dotnet run` publish anything? No.** `dotnet run` is purely a local convenience: it builds (only if source changed) straight into `bin/Debug/`, then immediately starts the app from that build output — for a web app, that means Kestrel starts up and binds to `localhost` on whatever port `launchSettings.json` says. Nothing is ever copied anywhere, and no `publish/` folder is created. That's exactly why "it works when I run it locally" and "it's actually hosted somewhere" are two different questions — `dotnet run` never touches the deployment path at all.
+
+**So how does the same app end up reachable on the internet?** The real flow looks like this:
+
+```mermaid
+flowchart LR
+    A["dotnet publish"] --> B["Deployable output"]
+    B --> C["Copied / pushed to the server"]
+    C --> D["Something starts the app there"]
+    D --> E["Kestrel binds a port"]
+    E --> F["Reverse proxy / load balancer"]
+```
+
+Step by step: a build/CI server runs `dotnet publish` (not `dotnet run`) to produce the deployable output — either a plain folder, or a container image if you're going that route. That artifact gets copied to the actual server (or pushed to a registry, for containers). Something on that server then *starts* the app as a running process — either by executing the apphost / `dotnet App.dll` directly, or by a container runtime starting a container from the image. At that point the app's own Kestrel is listening, exactly like it does locally, just on a real server instead of your laptop — and then it's section 8's job (reverse proxy, load balancer) to make that internet-reachable, instead of only reachable from `localhost`.
+
+Worth stating outright: the server only ever needs that published output — the compiled DLLs, `.deps.json`, `.runtimeconfig.json`, and any config files. It never needs the `.cs` source files, the `.csproj`, or `bin`/`obj`'s intermediate build clutter. That's the entire point of compiling ahead of time: the published folder (or container image) is a self-sufficient artifact the runtime can execute on its own, and source code never needs to leave the development/CI environment.
+
+## 4. From C# source code to a running application
+
+The short version: source code compiles into IL, IL gets packaged into a file called an assembly, and the runtime loads and executes that assembly.
+
+```mermaid
+flowchart LR
+    A["C# source"] --> B["IL + metadata"]
+    B --> C["Assembly (.dll)"]
+    C --> D["CLR loads it"]
+    D --> E["JIT to native code"]
+    E --> F["Running process"]
+```
+
+The step that's easy to skip over mentally is the middle one: going from **"IL + metadata"** to **"Assembly (.dll)"** in the diagram above. The compiler's real output is IL plus metadata, not a `.dll` by itself. That IL and metadata then get packaged into a file using the **PE (Portable Executable) format** — and *that* packaged file is what we call the assembly, the `.dll`. So "compiling to a DLL" is really "compiling to IL, then packaging the IL into a DLL-shaped container." Section 3.1 has the fuller breakdown of these same three things side by side.
+
+A **DLL** in .NET is that assembly — a compiled unit bundling IL code, metadata describing its types, and a manifest listing which other assemblies it depends on.
+
+Alongside that DLL, a build also produces a small native launcher — commonly called the **apphost**. Its only job is to find an installed .NET runtime and tell it to load and run the app's DLL, which is why you can run `./MyApp` directly instead of typing `dotnet MyApp.dll` yourself. Sections 4.1 and 4.2 below show this for real and go deeper on what it actually is.
+
+### 4.1 A worked example: one file, three stages
+
+To make this concrete instead of abstract, I actually built this (as a throwaway scratch project, not part of this repo) while writing this section, rather than guess at the output.
+
+```csharp
+// Program.cs
+Console.WriteLine("Hello from Day 0");
+```
+
+Running `dotnet build` on that one file, then looking inside `bin/Debug/net10.0/`, produced exactly this (real output from my machine, macOS/Arm):
+
+```text
+bin/Debug/net10.0/
+├── HelloDay0                       # the apphost (defined above) — no extension on macOS/Linux
+├── HelloDay0.dll                   # the assembly: IL + metadata, packaged in PE format
+├── HelloDay0.deps.json             # lists the app's runtime dependencies
+├── HelloDay0.pdb                   # debug symbols (used for stack traces / breakpoints)
+└── HelloDay0.runtimeconfig.json    # which .NET version/runtime this app targets
+```
+
+The genuinely useful bit: I ran the Unix `file` command against both binaries to see what they actually *are* at the file-format level:
+
+```text
+HelloDay0:     Mach-O 64-bit executable arm64
+HelloDay0.dll: PE32 executable (console) Intel 80386 Mono/.Net assembly, for MS Windows
+```
+
+`HelloDay0` (the apphost) is a real native macOS binary (Mach-O). But `HelloDay0.dll` reports itself as a **Windows PE32 executable** — even though it was built and will run on a Mac. That's not a bug; it's the point of the assembly format: the `.dll` container is the *same* PE-based format on every OS, because it only needs to be understood by the CLR (which knows how to read PE files everywhere), never by the host OS's own loader. The apphost, by contrast, genuinely is OS-specific, because *it* is what the OS itself has to be able to launch directly.
+
+### 4.2 DLL vs EXE, and where each one comes from
+
+On modern SDKs, the apphost is produced automatically, right alongside the DLL, from a plain `dotnet build` — not just from publishing. That's what the file listing in 4.1 shows: `HelloDay0` and `HelloDay0.dll` were both sitting in `bin/Debug/net10.0/` after nothing more than `dotnet build`.
+
+- **On Windows**, the apphost is named `<AppName>.exe`.
+- **On macOS/Linux**, there's no `.exe` extension — it's just `<AppName>`, with no extension at all. It's still a genuine native binary (Mach-O on macOS, ELF on Linux); the *alternative* to a `.exe` on non-Windows platforms is simply an extension-less native executable playing the same role.
+
+All the real application logic still lives in the DLL — the apphost's only job (as introduced in section 4 above) is to locate a matching installed .NET runtime, start it, and tell it to load this app's `.dll`. It exists purely for convenience.
+
+One more distinction worth knowing, expanded fully in section 3.3: `dotnet build` output (`bin/Debug/<tfm>/`, as above) is meant for local development. `dotnet publish` output (`bin/Release/<tfm>/publish/` by default) is the one meant for actual deployment.
 
 > **Verification exercise (do this after Day 1, once a project exists):**
-> Run `dotnet build`, then look inside `bin/Debug/<target-framework>/` (e.g. `bin/Debug/net9.0/`). Identify:
-> - The application's own DLL (named after the project)
-> - The dependency DLLs it references (NuGet packages, shared framework references)
-> - Whether an executable host is present for your OS
+> Run `dotnet build`, then look inside `bin/Debug/<target-framework>/` (e.g. `bin/Debug/net10.0/`, or whatever version is installed) — compare it against the file listing in section 4.1 above. Identify the application's own DLL, the dependency DLLs it references, and the apphost — then check what `file` (macOS/Linux) or a similar tool reports it as.
 
 ## 5. What kinds of applications can .NET build?
 
@@ -155,6 +331,16 @@ The API receives that request, looks up the tasks (probably from a database), an
 ```
 
 The React app never needs to know how the server fetched that data — just the contract: send a `GET` to `/api/tasks`, get JSON back.
+
+### 6.1 A non-web API, for contrast
+
+"API" is a broader idea than "Web API" — it's easy to lose sight of that when everything I build day-to-day happens to be a web API. Here's one with no HTTP involved at all: .NET's own file-system library.
+
+```csharp
+string content = File.ReadAllText("notes.txt");
+```
+
+`File.ReadAllText` is an API — a defined way to ask "read this file's contents for me" without needing to know how it opens file handles, reads bytes off disk, or decodes them into a string. Same definition of "API" as section 6's opening line. What's different from the Web API example above is entirely about *where* the call happens: `File.ReadAllText` runs as a plain method call inside the same process that calls it — no network, no client/server split, no serialization to JSON. The `GET /api/tasks` example crosses a real boundary between two separate running processes, which is exactly why it needs HTTP as a shared protocol in the first place. (The Win32 API and the POSIX API are two more well-known non-web examples — defined sets of functions an OS exposes for programs to call directly, in-process, no network involved.)
 
 ## 7. HTTP fundamentals
 
@@ -202,24 +388,130 @@ curl -i https://localhost:5001/api/tasks
 
 `-i` includes the response headers and status line, which is useful for seeing exactly what came back, not just the body.
 
+### 7.1 Why HTTPS needs a certificate
+
+Start from the actual problem, not the solution. Plain HTTP (no "S") is just: open a raw TCP connection to a server, and start sending plain-text HTTP messages over it. That has two real weaknesses:
+
+1. **No privacy.** Anything sent in plain text can be read by anything sitting between you and the server — your Wi-Fi router, your ISP, a compromised network hop. There's no scrambling of any kind.
+2. **No identity check.** Your browser has no built-in way to confirm the machine that answered on the other end of that TCP connection is actually the real `api.example.com`, and not something else that happened to intercept the connection (a "man in the middle").
+
+HTTPS is HTTP run over an extra layer, TLS, and TLS is specifically what solves both problems — but to encrypt a conversation *and* prove identity, TLS needs some piece of trusted evidence to build on, and that evidence is the certificate. So the certificate isn't "proof a domain is registered so nobody else can host there" (that's DNS's job, and DNS alone doesn't stop impersonation) — it's closer to: **cryptographic proof, checked by your browser, that the entity on the other end holds the specific private key matching a certificate that some already-trusted third party (a Certificate Authority) issued specifically for this domain name.** An attacker can absolutely stand up a server and claim to be your bank; what they can't do is produce a certificate for your bank's real domain signed by a CA your browser already trusts, because CAs only issue one after verifying the requester actually controls that domain.
+
+Once the browser is satisfied the certificate checks out, that same certificate also hands over the key material used to set up the encrypted channel for the rest of the conversation — solving problem #1 too, as a side effect of solving #2.
+
+**Certificates expire on purpose.** An expired certificate is like an ID card past its expiry date — the issuer is no longer actively vouching for it, even if the underlying keys technically still work. That's exactly what the "certificate expired" browser warning means: the identity claim had a "valid until" date, and it's passed.
+
+**For local development**, ASP.NET Core ships a self-signed local dev certificate so `https://localhost:5001` works without buying a real one. It isn't trusted by your OS automatically — you have to say so explicitly, once:
+
+```bash
+dotnet dev-certs https --trust
+```
+
+In production, you need a real certificate issued by a trusted CA for your actual domain. In most real deployments, that certificate lives on whatever is doing TLS termination — the reverse proxy or cloud load balancer covered in section 8 — rather than on Kestrel itself, which is one more reason that layer exists.
+
 ## 8. What is a .NET server?
 
-"A .NET server" isn't a separate product you install — it usually just means **a running ASP.NET Core application process that is listening for HTTP requests**. The "server" is the app itself, plus the web server component embedded in it.
+Quick disambiguation before anything else, because "server" gets overloaded three different ways in casual conversation:
 
-That embedded component is **Kestrel** — ASP.NET Core's cross-platform HTTP server, included by default in every ASP.NET Core project. Kestrel is what actually accepts TCP connections and parses HTTP requests before handing them to the application.
+| Sense of "server" | Example |
+|---|---|
+| A physical/virtual machine | "the server in AWS" |
+| A running process providing some service | "the database server" |
+| Specifically, a process that handles HTTP requests | "the .NET server" — this section |
 
-A few related concepts at a high level, without going deep yet:
+"A .NET server," in that third sense, isn't a separate product you install — it usually just means **a running ASP.NET Core application process that is listening for HTTP requests**. The "server" is the app itself, plus the web server component embedded in it. So yes — in this specific sense, "server" *is* directly tied to handling HTTP; that's the meaning this whole section uses.
 
-- **localhost** — the loopback address for "this machine," used during local development so the API is only reachable from the same computer.
-- **Port** — the number Kestrel binds to and listens on (e.g. `5001`); multiple processes on one machine each need their own port.
-- **Reverse proxy** — in production, Kestrel often sits behind another server (like NGINX or IIS, or a cloud load balancer) that handles things like TLS termination, load balancing, or serving multiple apps behind one public address, and forwards requests to Kestrel.
-- **Cloud infrastructure** — in a cloud deployment, there's typically a load balancer or gateway in front of the reverse proxy/Kestrel layer, but the same fundamentals apply: something accepts the public connection, and it's ultimately routed to a Kestrel process running the app.
+**One naming detour, since it comes up constantly:** ".NET Framework" was the original, Windows-only .NET (2002), still supported but in maintenance, not actively evolved. ".NET Core" was the cross-platform rebuild, started 2016. Starting at version 5 (2020), Microsoft dropped the word "Core" and just called it **.NET** — so ".NET Core" and modern ".NET" (5, 6, 7 … 10) are the same lineage, just a rebrand partway through; ".NET Framework" is the older, separate thing. Everything in this repo is modern .NET.
+
+### 8.1 HTTP rides on top of TCP
+
+This is the piece that kept feeling contradictory until I drew it as layers instead of a single word: **HTTP and TCP are not two competing things — HTTP is built on top of TCP.**
+
+```mermaid
+flowchart TD
+    A["TCP: a reliable connection between two machines"] --> B["HTTP: the request/response format sent over that connection"]
+```
+
+TCP's only job is moving raw bytes reliably between two machines, in order, without you having to think about packet loss or retransmission — it knows nothing about "GET," "headers," or "JSON." HTTP is a *text format* layered on top: once a TCP connection exists, HTTP defines what the bytes flowing over it mean (a method, a path, headers, a body). So "listening for HTTP requests" is always, underneath, "listening for TCP connections, then interpreting the bytes that arrive on them as HTTP."
+
+Concretely, at the OS level: a process that "listens" has asked the OS to reserve a port (say, `5001`) and told it *"whenever a new TCP connection arrives here, hand it to me"* — a socket **bind** followed by a **listen**, standard OS networking, not .NET-specific. Once a connection actually arrives, the process **accepts** it, reads the raw bytes coming in, and parses them according to the HTTP spec — pulling out the method, path, headers, and body from section 7. Kestrel (next section) is the piece of ASP.NET Core that does exactly this.
+
+Two lower-level alternatives, worth knowing exist even though you won't touch them directly: **`HttpListener`**, an older, lower-level .NET class that does the same bind-and-parse job at a smaller scale (not what ASP.NET Core uses internally); and **HTTP.sys**, a Windows *kernel-mode* HTTP listener that IIS uses, and that Kestrel can optionally use instead of its default listener on Windows.
+
+### 8.2 Kestrel, in one sentence first
+
+**Kestrel is the piece of code, running inside your own app's process, that does the listening from 8.1 and turns raw TCP bytes into an HTTP request object your code can work with.** It's not a separate product to install — it's a library, included by default in every ASP.NET Core project, and the same Kestrel code runs unmodified on Windows, macOS, and Linux.
+
+```mermaid
+flowchart LR
+    A["OS: TCP/IP"] --> B["Kestrel: parses HTTP"]
+    B --> C["ASP.NET Core"]
+    C --> D["Your code"]
+```
+
+The response travels back out through that same chain in reverse — Kestrel is what actually writes the response bytes back onto the TCP connection.
+
+Kestrel deliberately knows nothing about routes, authentication, or your business logic — it only handles the raw HTTP mechanics. Everything above that (middleware, routing, dependency injection) is the ASP.NET Core layer sitting on top of it, which section 10.1 maps out in full. Kestrel is hardened enough to be used directly, facing the public internet, in a modern deployment — but it's still extremely common to put something in front of it, covered next.
+
+### 8.3 Reverse proxies: the simple picture, then Nginx and IIS
+
+**The simple picture first:** a reverse proxy is just something that sits between the internet and Kestrel, so clients talk to *it* instead of talking to Kestrel directly.
+
+```mermaid
+flowchart LR
+    A["Client"] --> B["Reverse proxy"]
+    B --> C["Kestrel"]
+```
+
+That's the entire idea. Everything below is *why* you'd want that extra hop, and which real products play that role.
+
+**Why put one in front of Kestrel at all?** A few concrete, recurring reasons:
+
+- **TLS termination** — the proxy holds the real, CA-issued certificate (section 7.1) and decrypts HTTPS traffic; it then talks to Kestrel over plain HTTP, but only over `localhost` or a private network. Certificate management lives in one place instead of on every app instance.
+- **Sharing one public port across many apps** — only one process can bind port 443 at a time; the proxy listens there and routes to whichever backend app a given hostname or path belongs to.
+- **Buffering and shielding against slow or abusive clients** — connection limits and basic filtering happen before load reaches your app process.
+- **Static files, caching, compression, centralized logging** — often cheaper to handle once at the proxy layer than inside every app instance.
+
+**Nginx** is an open-source, high-performance web server, very commonly used as a reverse proxy on Linux. In front of an ASP.NET Core app, Nginx listens on the public port (typically 443), terminates TLS, and forwards each request to Kestrel over `localhost` (e.g. `http://127.0.0.1:5000`). Because Nginx's own connection to Kestrel replaces the original client's IP and protocol info, it adds `X-Forwarded-For` and `X-Forwarded-Proto` headers carrying the *real* original client IP and whether the original request was HTTPS — which ASP.NET Core's **Forwarded Headers Middleware** reads back out.
+
+**IIS (Internet Information Services)** is Microsoft's web server for Windows Server — what "classic" (pre-Core) ASP.NET ran inside directly. For ASP.NET Core, IIS can host an app two ways: **out-of-process** (IIS behaves exactly like Nginx above — a reverse proxy forwarding to a separate Kestrel process via the ASP.NET Core Module), or **in-process** (the modern default — the app runs *inside* IIS's own worker process directly, using an IIS-native listener instead of Kestrel at all, for better performance on Windows).
+
+Whichever one — Nginx, IIS-out-of-process, or anything else playing this role — they all share the same shape from the diagram above: *public-facing listener → forwards to → app*.
+
+### 8.4 Cloud load balancers
+
+A load balancer solves a related but different problem: instead of forwarding to *one* known backend, it distributes traffic across *many identical instances* of your app, so no single instance gets overwhelmed and the app survives any one instance crashing.
+
+```mermaid
+flowchart LR
+    C1["Client 1"] --> LB["Load balancer"]
+    C2["Client 2"] --> LB
+    LB --> K1["Instance 1"]
+    LB --> K2["Instance 2"]
+    LB --> K3["Instance 3"]
+```
+
+A cloud load balancer (AWS Application Load Balancer, Azure Load Balancer, a Kubernetes Ingress) very often does TLS termination too, exactly like a reverse proxy, and forwards the same `X-Forwarded-*` headers. The conceptual difference: a reverse proxy fans a request to *one* known backend; a load balancer *chooses which of several* identical backends handles this particular request. In real deployments these roles frequently overlap — one piece of infrastructure often does both jobs at once.
+
+### 8.5 Putting it together
+
+```mermaid
+flowchart TD
+    subgraph Edge["Optional edge layer"]
+        LB["Load balancer"] --> RP["Reverse proxy"]
+    end
+    RP --> K["Kestrel"]
+    K --> MW["Middleware pipeline"]
+    MW --> EP["Endpoint"]
+```
+
+Not every deployment has every layer. A small side project might run Kestrel directly on a cloud VM, listening on its own port with nothing in front of it. A typical company deployment stacks a cloud load balancer, then a reverse proxy (Nginx or IIS), then Kestrel — each layer adding exactly one responsibility (distribute load; terminate TLS and route; parse HTTP and hand off to the app). Section 9 traces this same idea as one request's actual journey, including what's different for local development.
 
 *How Kestrel decides what to do with a request once it has one — the middleware pipeline — is deliberately not covered here. That's Day 1.*
 
 ## 9. How an HTTP request reaches an ASP.NET Core API
 
-The general path, including the pieces that may or may not be present depending on the deployment:
+The general path, including the pieces that may or may not be present depending on the deployment (see section 8 for what each of these actually is):
 
 ```mermaid
 flowchart LR
@@ -267,20 +559,38 @@ The same project can also be created through **Visual Studio** (File → New Pro
 
 No generated project files are added to this repository as part of this Day 0 document — that happens when the API is actually scaffolded.
 
+### 10.1 Where routing, middleware, DI, and configuration sit on top of Kestrel
+
+Section 8.2 said middleware, routing, and DI are "the ASP.NET Core layer on top of Kestrel" without saying how they actually get wired on top of it. The answer is the **.NET Generic Host**.
+
+When a Web API's `Program.cs` calls `WebApplication.CreateBuilder(args)` and then `builder.Build()`, it's constructing a **host** — an object that owns and coordinates everything the app needs to run as one coherent process: configuration, the dependency injection container, logging, and — because this is a web app — the HTTP server itself. `CreateBuilder` registers Kestrel as "the thing that listens for HTTP" automatically, so Kestrel becomes just one more service the host starts and stops as part of the app's lifecycle.
+
+```mermaid
+flowchart TD
+    A["OS networking"] --> B["Kestrel"]
+    B --> C["Generic Host: config, DI, logging"]
+    C --> D["Middleware pipeline"]
+    D --> E["Routing"]
+    E --> F["Your endpoint code"]
+```
+
+That diagram simplifies one thing worth flagging: configuration and DI aren't stages a request "passes through" in sequence the way middleware and routing genuinely are — they're infrastructure the host makes available continuously, which any layer can reach into at any point. Middleware and routing really are an ordered pipeline the request flows through one step at a time — which is exactly what Day 1 is for.
+
 ## 11. Understanding a Web API project structure
 
-A freshly generated ASP.NET Core Web API project typically looks like this:
+A freshly generated ASP.NET Core Web API project (this is the actual layout `dotnet new webapi` produces on the current SDK — I generated one as a scratch project to confirm, rather than go from memory):
 
-```text
-DotnetApiFundamentals.Api/
-├── Program.cs                          # entry point + app configuration
-├── appsettings.json                    # base configuration
-├── appsettings.Development.json        # dev-environment overrides
-├── Properties/
-│   └── launchSettings.json             # local run profiles (ports, env vars)
-├── DotnetApiFundamentals.Api.csproj    # project file: target framework, packages
-├── bin/                                # generated build output — do not commit
-└── obj/                                # generated intermediate build files — do not commit
+```mermaid
+flowchart TD
+    Root["DotnetApiFundamentals.Api/"] --> Prog["Program.cs"]
+    Root --> AppSettings["appsettings.json"]
+    Root --> AppSettingsDev["appsettings.Development.json"]
+    Root --> Props["Properties/"]
+    Props --> Launch["launchSettings.json"]
+    Root --> Http["*.http (scratch file for requests)"]
+    Root --> Csproj["*.csproj (project file)"]
+    Root --> Bin["bin/ (build output)"]
+    Root --> Obj["obj/ (intermediate files)"]
 ```
 
 `bin/` and `obj/` are regenerated every time the project builds — they hold compiled output and intermediate build artifacts respectively, and belong in `.gitignore`, not in source control.
@@ -332,12 +642,20 @@ This document is notes and definitions — the following is what still needs to 
 
 ## Sources
 
-- [Introduction to .NET](https://learn.microsoft.com/en-us/dotnet/core/introduction) — what .NET is, its components (runtime, libraries, compiler, SDK, app stacks)
+- [Introduction to .NET](https://learn.microsoft.com/en-us/dotnet/core/introduction) — what .NET is, its components, and the .NET (Core) vs. .NET Framework naming history
 - [C# documentation](https://learn.microsoft.com/en-us/dotnet/csharp/) — the C# language
 - [Overview of ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/introduction-to-aspnet-core) — what ASP.NET Core is and its key features
 - [.NET CLI overview](https://learn.microsoft.com/en-us/dotnet/core/tools/) — the `dotnet` command-line tooling
+- [Install .NET on Windows](https://learn.microsoft.com/en-us/dotnet/core/install/windows) — the separate Runtime vs. SDK installers, and what each includes
 - [Assemblies in .NET](https://learn.microsoft.com/en-us/dotnet/standard/assembly/) — what an assembly/DLL is
+- [Managed Execution Process](https://learn.microsoft.com/en-us/dotnet/standard/managed-execution-process) — compiling to IL, JIT compilation, code verification
+- [.NET application publishing overview](https://learn.microsoft.com/en-us/dotnet/core/deploying/) — self-contained vs. framework-dependent vs. container deployment
+- [Enforce HTTPS in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/security/enforcing-ssl) — TLS certificates and the local dev certificate
 - [Kestrel web server in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel) — the embedded cross-platform web server
+- [Host ASP.NET Core on Windows with IIS](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/) — in-process vs. out-of-process hosting
+- [Host ASP.NET Core on Linux with Nginx](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/linux-nginx) — Nginx as a reverse proxy in front of Kestrel
+- [Configure ASP.NET Core to work with proxy servers and load balancers](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/proxy-load-balancer) — forwarded headers, `X-Forwarded-For`/`X-Forwarded-Proto`
+- [.NET Generic Host in ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/host/generic-host) — how DI, configuration, logging, and Kestrel are wired together
 - [ASP.NET Core Middleware](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/middleware/) — the pipeline covered in depth on Day 1
 - [Tutorial: Create a minimal API with ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/tutorials/min-web-api) — `dotnet new webapi` and Minimal APIs
 - [Handle requests with controllers in ASP.NET Core MVC](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/actions) — the controller-based alternative
